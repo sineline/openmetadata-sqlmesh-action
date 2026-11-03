@@ -1,0 +1,44 @@
+name: Package checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - python: '3.10'
+            sqlmesh: '0.231.1'
+          - python: '3.12'
+            sqlmesh: '0.236.3'
+    env:
+      SQLMESH__DISABLE_ANONYMIZED_ANALYTICS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install '.[dev,sqlmesh]' 'sqlmesh==${{ matrix.sqlmesh }}'
+      - run: python -m ruff check src tests
+      - run: python -m ruff format --check src tests
+      - run: python -m pytest -q
+      - run: python -m build
+      - run: openmetadata-sqlmesh sync --project examples/sqlmesh --config examples/openmetadata-sqlmesh.json --dry-run --output metadata.json
+
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install '.[dev]'
+      - run: python -c 'import openmetadata_sqlmesh; import importlib.util; assert importlib.util.find_spec("sqlmesh") is None'
+      - run: python -m pytest -q --ignore=tests/test_extract.py --ignore=tests/test_integration.py

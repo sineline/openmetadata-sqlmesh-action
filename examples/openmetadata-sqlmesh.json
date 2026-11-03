@@ -1,0 +1,7 @@
+{
+  "url": "https://metadata.example.com",
+  "database_service": "warehouse",
+  "pipeline_service": "sqlmesh",
+  "default_database": "memory",
+  "token_env": "OPENMETADATA_TOKEN"
+}

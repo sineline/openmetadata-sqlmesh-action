@@ -1,0 +1,117 @@
+name: SQLMesh to OpenMetadata
+description: Synchronize SQLMesh model metadata and lineage using the standalone Python package
+
+inputs:
+  project-path:
+    description: SQLMesh project directory in the checked-out consumer repository
+    default: '.'
+  openmetadata-url:
+    description: OpenMetadata server URL (root or /api/v1)
+    required: true
+  database-service:
+    description: Existing OpenMetadata database service
+    required: true
+  openmetadata-token:
+    description: OpenMetadata JWT; use a GitHub Actions secret
+    default: ''
+  pipeline-service:
+    description: Pipeline service to create or reuse
+    default: sqlmesh
+  default-database:
+    description: Database for SQL names without a catalog component
+    default: ''
+  default-schema:
+    description: Schema for SQL names without a schema component
+    default: ''
+  catalog-services:
+    description: JSON mapping of catalog names to existing OpenMetadata database services
+    default: '{}'
+  gateway:
+    description: Optional SQLMesh gateway
+    default: ''
+  dry-run:
+    description: Extract JSON without contacting OpenMetadata (true or false)
+    default: 'false'
+  python-version:
+    description: Python version for the package
+    default: '3.11'
+  sqlmesh-version:
+    description: SQLMesh version; install project-specific drivers before invoking this Action
+    default: '0.236.3'
+
+outputs:
+  report-path:
+    description: Absolute path of the JSON metadata or synchronization report
+    value: ${{ steps.sync.outputs.report-path }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install standalone package
+      shell: bash
+      env:
+        ACTION_DIRECTORY: ${{ github.action_path }}
+        SQLMESH_VERSION: ${{ inputs.sqlmesh-version }}
+      run: python -m pip install "${ACTION_DIRECTORY}[sqlmesh]" "sqlmesh==${SQLMESH_VERSION}"
+    - name: Synchronize SQLMesh metadata
+      id: sync
+      shell: bash
+      env:
+        OM_PROJECT: ${{ inputs.project-path }}
+        OM_URL: ${{ inputs.openmetadata-url }}
+        OPENMETADATA_URL: ${{ inputs.openmetadata-url }}
+        OM_DATABASE_SERVICE: ${{ inputs.database-service }}
+        OPENMETADATA_TOKEN: ${{ inputs.openmetadata-token }}
+        OM_PIPELINE_SERVICE: ${{ inputs.pipeline-service }}
+        OM_DEFAULT_DATABASE: ${{ inputs.default-database }}
+        OM_DEFAULT_SCHEMA: ${{ inputs.default-schema }}
+        OM_CATALOG_SERVICES: ${{ inputs.catalog-services }}
+        OM_GATEWAY: ${{ inputs.gateway }}
+        OM_DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+        import subprocess
+        import uuid
+
+        dry_run = os.environ['OM_DRY_RUN'].lower()
+        if dry_run not in {'true', 'false'}:
+            raise SystemExit('dry-run must be true or false')
+        config = {
+            'url': os.environ['OM_URL'],
+            'database_service': os.environ['OM_DATABASE_SERVICE'],
+            'pipeline_service': os.environ['OM_PIPELINE_SERVICE'],
+            'catalog_services': json.loads(os.environ['OM_CATALOG_SERVICES']),
+        }
+        for key in ('default_database', 'default_schema'):
+            value = os.environ['OM_' + key.upper()]
+            if value:
+                config[key] = value
+        prefix = Path(os.environ['RUNNER_TEMP']) / ('openmetadata-sqlmesh-' + uuid.uuid4().hex)
+        config_path = prefix.with_suffix('.config.json')
+        report_path = prefix.with_suffix('.report.json')
+        config_path.write_text(json.dumps(config), encoding='utf-8')
+        command = ['openmetadata-sqlmesh', 'sync', '--config', str(config_path),
+                   '--project', os.environ['OM_PROJECT'], '--output', str(report_path)]
+        if os.environ['OM_GATEWAY']:
+            command.extend(['--gateway', os.environ['OM_GATEWAY']])
+        if dry_run == 'true':
+            command.append('--dry-run')
+        try:
+            result = subprocess.run(command, check=False)
+        finally:
+            config_path.unlink(missing_ok=True)
+        with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+            output.write('report-path=' + str(report_path) + '\n')
+        if report_path.is_file():
+            report = json.loads(report_path.read_text(encoding='utf-8'))
+            for error in report.get('errors', []):
+                print(error)
+            print('OpenMetadata report: ' + str(report_path))
+        raise SystemExit(result.returncode)
+        PY

@@ -1,0 +1,5 @@
+include README.md action.yml
+recursive-include examples *.json *.sql *.yaml
+recursive-include tests *.py
+prune examples/sqlmesh/.cache
+prune examples/sqlmesh/logs

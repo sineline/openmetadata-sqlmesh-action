@@ -1,0 +1,9 @@
+[
+  {
+    "model": "memory.analytics.orders",
+    "audit": "not_null_id",
+    "timestamp": 1793657000000,
+    "query": "SELECT * FROM memory.analytics.orders WHERE id IS NULL",
+    "count": 0
+  }
+]

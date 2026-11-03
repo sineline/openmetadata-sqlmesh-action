@@ -1,274 +1,164 @@
-# OpenMetadata DBT Ingestion with GitHub Actions
+# SQLMesh to OpenMetadata
 
-This repository demonstrates how to automate DBT metadata ingestion into OpenMetadata using GitHub Actions. It provides a complete example of running DBT workflows externally and ingesting the generated artifacts into OpenMetadata.
+An installable Python package and reusable GitHub Action for SQLMesh metadata, table and column lineage, model execution status, and audit results in OpenMetadata.
 
-## Overview
+The package calls OpenMetadata's native REST API. It runs independently of Dionysus, Airflow, Marquez, dbt artifacts, and the OpenMetadata ingestion SDK. The core library has no third-party dependencies; SQLMesh extraction and runtime observation use an optional extra.
 
-This solution enables you to:
-- Automatically ingest DBT metadata into OpenMetadata on every push
-- Run ingestion workflows without direct access to the OpenMetadata server
-- Store DBT artifacts locally and process them through GitHub Actions
-- Maintain version control of your DBT metadata configuration
+## Install and try it
 
-## Architecture
-
-```
-DBT Project → Generate Artifacts → GitHub Actions → OpenMetadata Ingestion → OpenMetadata Server
-```
-
-## Prerequisites
-
-- An OpenMetadata instance (version 1.0+)
-- DBT artifacts (manifest.json, catalog.json, run_results.json)
-- GitHub repository with Actions enabled
-- OpenMetadata JWT token for authentication
-
-> **⚠️ Version Compatibility:** The `openmetadata-ingestion` package version MUST match your OpenMetadata server version. For example, if your OpenMetadata server is version 1.5.11, you must install `openmetadata-ingestion[dbt]==1.5.11`
-
-## Repository Structure
-
-```
-.
-├── .github/
-│   └── workflows/
-│       └── openmetadata-ingestion.yml    # GitHub Action workflow
-├── artifacts/                            # Example location (can be anywhere in repo)
-│   ├── catalog.json                      # DBT catalog artifact
-│   ├── manifest.json                     # DBT manifest artifact
-│   └── run_results.json                  # DBT run results artifact
-└── openmetadata_dbt_config.yaml          # OpenMetadata ingestion configuration
-```
-
-> **Note:** DBT artifacts can be stored anywhere within your repository. The `artifacts/` folder is just an example. You can organize them in any directory structure that suits your project (e.g., `dbt/target/`, `build/dbt/`, etc.)
-
-## Setup Instructions
-
-### 1. Generate DBT Artifacts
-
-First, generate your DBT artifacts by running these commands in your DBT project:
+From this repository:
 
 ```bash
-# Generate manifest.json
-dbt compile
-
-# Generate catalog.json
-dbt docs generate
-
-# Generate run_results.json
-dbt run
+python -m pip install '.[sqlmesh]'
+openmetadata-sqlmesh --help
+openmetadata-sqlmesh sync --project examples/sqlmesh --config examples/openmetadata-sqlmesh.json --dry-run
 ```
 
-Place these files in your repository. They can be stored in any directory structure you prefer (e.g., `artifacts/`, `dbt/target/`, `build/`, etc.).
+The example is a three-model DuckDB project. A dry run loads definitions and emits deterministic JSON without contacting OpenMetadata, running a plan, or querying warehouse data. Project configuration and macros execute normally during SQLMesh project loading; use projects you trust.
 
-### 2. Configure GitHub Secrets
-
-You have two options for setting up secrets:
-
-#### Option A: Environment Secrets (Recommended)
-1. Go to Settings → Environments → New environment
-2. Create an environment named `test` (or modify the workflow to use your environment name)
-3. Add these secrets to the environment:
-
-| Secret Name | Description | Example | Required |
-|------------|-------------|---------|----------|
-| `OPENMETADATA_HOST` | Your OpenMetadata API endpoint | `http://your-server:8585/api` | ✅ |
-| `OPENMETADATA_JWT_TOKEN` | JWT token for authentication | `eyJhbGciOiJIUzI1NiIsInR5cCI6...` | ✅ |
-| `OPENMETADATA_VERSION` | OpenMetadata server version | `1.9.1.0` | ✅ |
-
-#### Option B: Repository Secrets
-Add the secrets directly to Settings → Secrets and variables → Actions → Repository secrets (then remove the `environment: test` line from the workflow)
-
-> **Important:** 
-> - The `OPENMETADATA_VERSION` must exactly match your OpenMetadata server version
-> - Check your server version in OpenMetadata UI → Settings → About
-> - Common versions: `1.5.11`, `1.6.2`, `1.7.3`, `1.8.0`, `1.9.1.0`
-
-### 3. Configuration File
-
-The `openmetadata_dbt_config.yaml` file contains the ingestion configuration. **You need to update the following fields:**
-
-#### Required Updates:
-
-1. **`serviceName`**: Must match an existing database service name in your OpenMetadata instance
-2. **File paths**: Update to match your actual artifact locations in the repository
-
-```yaml
-source:
-  type: dbt
-  serviceName: dbt_git_test  # ⚠️ UPDATE: Must match existing service in OpenMetadata
-  sourceConfig:
-    config:
-      type: DBT
-  dbtConfigSource:
-    dbtConfigType: local
-    # ⚠️ UPDATE: Change these paths to match your artifact locations
-    dbtCatalogFilePath: /home/runner/work/openmetadata-dbt-action/openmetadata-dbt-action/artifacts/catalog.json
-    dbtManifestFilePath: /home/runner/work/openmetadata-dbt-action/openmetadata-dbt-action/artifacts/manifest.json
-    dbtRunResultsFilePath: /home/runner/work/openmetadata-dbt-action/openmetadata-dbt-action/artifacts/run_results.json
-
-sink:
-  type: metadata-rest
-  config: {}
-
-workflowConfig:
-  loggerLevel: INFO
-  openMetadataServerConfig:
-    hostPort: $OPENMETADATA_HOST
-    authProvider: openmetadata
-    securityConfig:
-      jwtToken: $OPENMETADATA_JWT_TOKEN
-```
-
-> **Important:** 
-> - The `serviceName` must exactly match a DBT service that already exists in your OpenMetadata instance
-> - If the service doesn't exist, you'll need to create it first in OpenMetadata
-> - File paths are relative to the repository root
-
-### 4. GitHub Action Workflow
-
-The workflow (`.github/workflows/openmetadata-ingestion.yml`) automatically:
-- Installs the OpenMetadata ingestion package
-- Validates DBT artifacts exist
-- Runs the metadata ingestion
-- Uploads logs as artifacts for debugging
-
-## Usage
-
-### Automatic Ingestion
-
-The ingestion runs automatically when:
-- You push changes to `main` or `master` branches
-- DBT artifacts are updated
-- The configuration file is modified
-- A pull request is opened
-
-### Manual Ingestion
-
-You can manually trigger the workflow:
-1. Go to Actions tab in your GitHub repository
-2. Select "OpenMetadata DBT Ingestion"
-3. Click "Run workflow"
-
-### Local Testing
-
-To test the ingestion locally:
+To install from Git in another project:
 
 ```bash
-# Install the package (version must match your OpenMetadata server)
-# Replace X.X.X with your OpenMetadata version (e.g., 1.5.11)
-pip install "openmetadata-ingestion[dbt]==X.X.X"
-
-# Set environment variables
-export OPENMETADATA_HOST="http://localhost:8585/api"
-export OPENMETADATA_JWT_TOKEN="your-jwt-token"
-
-# Run ingestion
-metadata ingest -c openmetadata_dbt_config.yaml
+python -m pip install 'openmetadata-sqlmesh[sqlmesh] @ git+https://github.com/sineline/openmetadata-sqlmesh-action.git@<ref>'
 ```
 
-> **Note:** Always ensure the `openmetadata-ingestion` package version matches your OpenMetadata server version to avoid compatibility issues.
+Replace `<ref>` with the branch or commit containing this implementation. Pin an immutable commit for reproducibility. The package is not published to PyPI.
 
-## Monitoring
+## Configuration and synchronization
 
-- Check the Actions tab in GitHub for workflow runs
-- Download ingestion logs from workflow artifacts
-- View imported metadata in your OpenMetadata instance
+Create `openmetadata-sqlmesh.json` in your project:
 
-## Troubleshooting
+```json
+{
+  "url": "https://metadata.example.com",
+  "database_service": "warehouse",
+  "pipeline_service": "sqlmesh",
+  "default_database": "analytics",
+  "default_schema": "public",
+  "catalog_services": {"other_catalog": "other_warehouse"},
+  "token_env": "OPENMETADATA_TOKEN",
+  "timeout": 10,
+  "retries": 2
+}
+```
 
-### Common Issues
+Database services must already exist in OpenMetadata. The package creates databases, schemas, model tables, and a `CustomPipeline` service as needed; it does not configure warehouse connections. The API identity needs read access to services, catalog entities, and lineage, plus permission to update the relevant entities, lineage, and test results.
 
-1. **Version Mismatch Error**
-   - Ensure `openmetadata-ingestion` package version matches your OpenMetadata server version exactly
-   - Check server version: OpenMetadata UI → Settings → About
-   - Update `OPENMETADATA_VERSION` secret in GitHub
+Defaults fill missing database/schema components; fully qualified model names do not need them. `catalog_services` maps SQL catalog names to existing services for cross-service dependencies. Case and quoted component boundaries are preserved: `db.schema."order.items"` maps to `warehouse.db.schema."order.items"`.
 
-2. **Authentication Failed**
-   - Verify JWT token is valid and not expired
-   - Check token has necessary permissions
+Keep tokens out of configuration files. Export the variable named by `token_env`; `OPENMETADATA_AUTH_TOKEN` is a fallback. `OPENMETADATA_URL` overrides the configured URL. Root URLs, `/api`, `/api/v1`, and legacy `/api/v1/lineage` URLs are accepted.
 
-3. **Service Not Found**
-   - Ensure the `serviceName` in your YAML matches an existing DBT service in OpenMetadata
-   - Create the service in OpenMetadata first if it doesn't exist
+```bash
+export OPENMETADATA_TOKEN='your-jwt'
+openmetadata-sqlmesh sync --project . --config openmetadata-sqlmesh.json --dry-run --output metadata.json
+openmetadata-sqlmesh sync --project . --config openmetadata-sqlmesh.json
+```
 
-4. **Artifacts Not Found**
-   - Verify DBT artifacts exist in your repository
-   - Ensure file paths in configuration match actual locations
-   - Remember: paths are relative to repository root
+Use `--gateway name` for projects with multiple gateways. Install project-specific connection drivers and macro dependencies in the same environment.
 
-5. **Connection Timeout**
-   - Verify OpenMetadata server is accessible
-   - Check network/firewall settings
+Sync publishes model/column descriptions, column types, SQL, pipelines, table dependencies, and resolvable column lineage. Repeated runs update metadata without deleting entities or pruning lineage. Existing edge details and column mappings are read and merged before updates; a failed lineage read prevents replacement. Missing external tables appear in `warnings`. Unresolved model columns reuse existing catalog schemas. Partially unresolved complex types retain the matching known type as a whole, with a warning. No placeholder column overwrites an existing schema.
 
-### Debug Mode
+Output is JSON. Exit codes: `0` success (possibly with warnings), `1` synchronization/publication errors, `2` invalid configuration/input or invocation failure. `--output` writes JSON to a file. A dry run describes extracted metadata and relationships, not warehouse execution results.
 
-Enable debug logging by modifying the configuration:
+## Python API and runtime observer
+
+```python
+from sqlmesh import Context
+from openmetadata_sqlmesh import Config, sync_context
+
+config = Config.from_file("openmetadata-sqlmesh.json")
+context = Context(paths="my_project")
+try:
+    report = sync_context(context, config)
+    if report.errors:
+        raise RuntimeError("; ".join(report.errors))
+finally:
+    context.close()
+```
+
+`extract_context(context, config)` returns `ProjectMetadata` / `ModelMetadata` records. `load_project(path, config, gateway=None)` loads, extracts, and closes a Context. `Synchronizer(config, client=None).sync(metadata)` accepts pre-extracted records. `sync_context(..., dry_run=True)` returns a JSON-compatible dictionary without API calls.
+
+To report runtime status, install the observer **before constructing the SQLMesh Context**, for example at the start of the consumer's `config.py`:
+
+```python
+from openmetadata_sqlmesh import Config, install
+
+install(Config.from_file("openmetadata-sqlmesh.json"))
+```
+
+The observer wraps the current Console and delegates ordinary output. It publishes pipeline status and upstream/output lineage on terminal callbacks. Concurrent batches retain separate execution records and distinct status timestamps. Query errors, audit failures, and interrupted evaluations are marked failed. Aggregate audit counters do not fabricate individual audit results.
+
+Reporting failures log warnings and SQLMesh work continues by default. `install(config, strict=True)` raises reporting errors after console delegation. Reinstalling the same configuration is safe; use `uninstall()` before changing configuration. `uninstall()` restores the wrapped console. Synchronize metadata first so upstream tables exist for runtime lineage.
+
+## Audit results
+
+This package reports supplied results; it does not execute warehouse-specific contracts or assume a declared audit ran.
+
+```python
+from openmetadata_sqlmesh import AuditRecord, Config, publish_audits
+
+config = Config.from_file("openmetadata-sqlmesh.json")
+records = [AuditRecord(
+    model="analytics.public.orders",
+    audit="not_null_id",
+    timestamp=1793657000000,  # Actual execution time in epoch milliseconds.
+    query="SELECT * FROM analytics.public.orders WHERE id IS NULL",
+    count=0,  # Failing rows from that execution.
+)]
+report = publish_audits(records, config)
+```
+
+For real model-scoped SQLMesh `AuditResult` objects returned by the snapshot evaluator, use `AuditRecord.from_sqlmesh(result, timestamp=execution_timestamp_ms)`. This preserves query, count, skipped status, and audit-argument identity. SQLMesh's `Context.audit()` is an execution command, not a source of returned result objects.
+
+The CLI accepts a JSON array of the same record fields:
+
+```bash
+openmetadata-sqlmesh audit-results examples/audit-results.json --config openmetadata-sqlmesh.json --dry-run
+openmetadata-sqlmesh audit-results results.json --config openmetadata-sqlmesh.json
+```
+
+Zero failing rows maps to `Success`, positive counts to `Failed`, and unavailable counts to `Aborted`. Explicit statuses are accepted when consistent with supplied counts. Model tables must exist. Executable suites and query-backed test cases are provisioned idempotently. A skipped audit without a query can update an existing case, but cannot invent a new query-backed case.
+
+## GitHub Action
+
+Check out the consumer project and install its additional drivers/macros, then use a ref containing this implementation:
 
 ```yaml
-workflowConfig:
-  loggerLevel: DEBUG
+permissions:
+  contents: read
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-python@v5
+    with:
+      python-version: '3.11'
+  - uses: sineline/openmetadata-sqlmesh-action@<ref>
+    id: metadata
+    with:
+      project-path: .
+      openmetadata-url: https://metadata.example.com
+      database-service: warehouse
+      openmetadata-token: ${{ secrets.OPENMETADATA_TOKEN }}
+      sqlmesh-version: '0.236.3'
+      dry-run: 'true'
 ```
 
-## Advanced Configuration
+Set `dry-run` to `'false'` to publish. Optional inputs: `pipeline-service`, `default-database`, `default-schema`, `catalog-services` (JSON), `gateway`, `python-version`. `report-path` points to the generated JSON report. Inputs pass through environment variables and quoted arguments; tokens are not written to configuration artifacts.
 
-### Service Name Configuration
+## Compatibility and development
 
-The `serviceName` must match an existing DBT service in OpenMetadata:
+- Python 3.10+; CI covers 3.10 and 3.12.
+- SQLMesh `>=0.231.1,<0.237`; real extraction/evaluation checks cover 0.231.1 and 0.236.3. The core API/configuration/audit JSON functions work without SQLMesh.
+- Native API contracts are checked against OpenMetadata 1.6.6 and 1.12.0. Audit publication handles the older required `testSuite` field and result route, plus the newer endpoint. Tests use local API fakes, not a live OpenMetadata deployment.
+- Embedded models and dynamic/Python-only transformations can limit metadata resolution. Warnings report unavailable information.
+- TLS verification stays enabled; redirects are rejected. Only 404 means missing. Transport errors, 429, and 5xx have bounded retries (`retries` means additional attempts); 401/403 are permanent failures.
 
-```yaml
-source:
-  serviceName: your_existing_dbt_service  # Must exist in OpenMetadata
+```bash
+python -m pip install '.[dev,sqlmesh]'
+python -m pytest -q
+python -m build
 ```
 
-To create a new DBT service in OpenMetadata:
-1. Navigate to Services → Add Service → DBT
-2. Configure the service with your DBT project details
-3. Use the exact service name in your YAML configuration
+CI checks the dependency-free core, CLI, local HTTP contracts, concurrent callbacks, and real DuckDB extraction/execution. It builds wheel/source distributions without publishing or accessing production catalogs.
 
-### Additional Metadata
-
-You can enhance the ingestion with additional metadata:
-
-```yaml
-source:
-  sourceConfig:
-    config:
-      type: DBT
-      dbtUpdateDescriptions: true  # Update descriptions from DBT
-      includeTags: true            # Include DBT tags
-      dbtClassificationName: PII   # Add classification tags
-```
-
-## Security Considerations
-
-- Never commit JWT tokens or sensitive credentials
-- Use GitHub Secrets for all sensitive information
-- Regularly rotate JWT tokens
-- Review GitHub Actions permissions
-
-## Contributing
-
-To contribute to this demonstration:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Resources
-
-- [OpenMetadata Documentation](https://docs.open-metadata.org/)
-- [DBT Connector Documentation](https://docs.open-metadata.org/latest/connectors/ingestion/workflows/dbt)
-- [Running DBT Workflow Externally](https://docs.open-metadata.org/latest/connectors/ingestion/workflows/dbt/run-dbt-workflow-externally)
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-
-## License
-
-This demonstration repository is provided as-is for educational purposes.
-
-## Support
-
-For issues related to:
-- This demo: Open an issue in this repository
-- OpenMetadata: Visit [OpenMetadata Slack](https://slack.open-metadata.org/)
-- DBT: Visit [DBT Community](https://community.getdbt.com/)
+References: [SQLMesh Context](https://sqlmesh.readthedocs.io/en/latest/_readthedocs/html/sqlmesh/core/context.html), [SQLMesh lineage](https://sqlmesh.readthedocs.io/en/latest/_readthedocs/html/sqlmesh/core/lineage.html), [OpenMetadata lineage](https://docs.open-metadata.org/v1.12.x/api-reference/lineage/add), [OpenMetadata schemas](https://github.com/open-metadata/OpenMetadata/tree/1.12.0-release/openmetadata-spec/src/main/resources/json/schema).
